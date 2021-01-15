@@ -1,0 +1,50 @@
+defaults:
+  run:
+    working-directory: p1
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - run: dotnet restore
+      - run: dotnet build
+    
+  test:
+    needs: build
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v2
+      - run: dotnet test
+
+  analyze:
+    needs: [build,test]
+    runs-on: ubuntu-20.04
+    env:
+      SONARCLOUD_TOKEN: ${{ secrets.SONARCLOUD_TOKEN }}
+    steps:
+      - uses: actions/checkout@v2
+      - run: dotnet tool install --global dotnet-sonnarscanner
+      - run: |
+          dotnet sonnarscanner begin /k:'[project key]' /o: '[organization]' /d:sonar.login=$SONARCLOUD_TOKEN /d:sonar.host.url='https://sonarcloud.io'
+          dotnet build
+          dotnet test
+          dotnet sonnarscanner end
+      # sonnarscanner reads the compiled (assembly) code, and sends the analysis
+      # to sonarcloud (in the specified organization).
+
+  pack:
+    needs: [build,test,analyze]
+    steps:
+      - uses: actions/checkout@v2
+      # docker handles publish.
+      # don't want to actually write the docker password (it would be visible in the history),
+      # so we'll inject it from elsewhere. Specifically, a repository secret on github.
+      - run: echo {{secrets.DOCKER_PASSWORD}} | docker login -u {{secrets.DOCKER_USER}} --password-stin
+      - run: docker image build -f dockerfile -t dockerdemo
+        working-directory: ../
+      - run: docker image tag dockerdemo elliotreid/dockerdemo
+      - run: docker image push elliotreid/dockerdemo
+      - run: docker logout
+
+on: push
